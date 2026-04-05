@@ -1,0 +1,105 @@
+// =============================================================================
+// ACTION: MainFaults_Action
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// ENDLAGENFEHLER
+// -----------------------------------------------------------------------------
+IF GVL_Sensors.RakeFCN_Away AND GVL_Sensors.RakeFCN_Home THEN
+    EndlageFehler := TRUE;
+ELSIF GVL_Sensors.ExtenderSensor_Down AND GVL_Sensors.ExtenderSensor_Up THEN
+    EndlageFehler := TRUE;
+ELSIF GVL_Sensors.FlumeSensor_Open AND GVL_Sensors.FlumeSensor_Closed THEN
+    EndlageFehler := TRUE;
+ELSE
+    IF NOT TimeoutError THEN EndlageFehler := FALSE; END_IF
+END_IF
+
+IF RakeStation.TimeoutError OR TelescopeStation.TimeoutError OR
+   FlumeStation.TimeoutError THEN
+    TimeoutError := TRUE;
+END_IF
+
+FaultActive := TimeoutError OR EndlageFehler OR EmergencyLatched;
+
+IF GVL_Buttons.EmergencyButton THEN
+    FaultActive := TRUE;
+END_IF
+
+// -----------------------------------------------------------------------------
+// ANIMATION RAKE
+// 0.0 = Home (Grundstellung), 10.0 = Away (weggeschwenkt)
+// -----------------------------------------------------------------------------
+IF GVL_Actuators.RakeFU_Enable THEN
+    IF GVL_Actuators.RakeFU_Away THEN
+        AnimRakeAngle := AnimRakeAngle + 0.3;
+        IF AnimRakeAngle > 10.0 THEN AnimRakeAngle := 10.0; END_IF
+    ELSIF GVL_Actuators.RakeFU_Home THEN
+        AnimRakeAngle := AnimRakeAngle - 0.3;
+        IF AnimRakeAngle < 0.0 THEN AnimRakeAngle := 0.0; END_IF
+    END_IF
+END_IF
+IF GVL_Sensors.RakeFCN_Away THEN AnimRakeAngle := 10.0; END_IF
+IF GVL_Sensors.RakeFCN_Home THEN AnimRakeAngle := 0.0;  END_IF
+
+// -----------------------------------------------------------------------------
+// ANIMATION TELESKOPARM
+// -----------------------------------------------------------------------------
+IF GVL_Actuators.TelescopeFU_Enable THEN
+    IF GVL_Actuators.TelescopeFU_Down THEN
+        AnimTelescopePos := AnimTelescopePos + 1.5;
+        IF AnimTelescopePos > 260.0 THEN AnimTelescopePos := 260.0; END_IF
+    ELSIF GVL_Actuators.TelescopeFU_Up THEN
+        AnimTelescopePos := AnimTelescopePos - 1.5;
+        IF AnimTelescopePos < 0.0 THEN AnimTelescopePos := 0.0; END_IF
+    END_IF
+END_IF
+IF GVL_Sensors.ExtenderSensor_Down THEN AnimTelescopePos := 260.0; END_IF
+IF GVL_Sensors.ExtenderSensor_Up   THEN AnimTelescopePos := 0.0;   END_IF
+
+IF GVL_Sensors.RakeFCN_Away OR GVL_Actuators.RakeFU_Away THEN
+    AnimTelescopeX := AnimTelescopePos * (-0.648);
+    AnimTelescopeY := AnimTelescopePos * 0.648;
+ELSE
+    AnimTelescopeX := AnimTelescopePos * (-0.707);
+    AnimTelescopeY := AnimTelescopePos * 0.707;
+END_IF
+
+// -----------------------------------------------------------------------------
+// ANIMATION SPÜLSCHIEBER
+// -----------------------------------------------------------------------------
+IF GVL_Actuators.FlumeMotor_On AND NOT GVL_Actuators.FlumeMotor_Close THEN
+    AnimFlumeSlider := AnimFlumeSlider + 1.4;
+    IF AnimFlumeSlider > 420.0 THEN AnimFlumeSlider := 420.0; END_IF
+ELSIF GVL_Actuators.FlumeMotor_Close AND NOT GVL_Actuators.FlumeMotor_On THEN
+    AnimFlumeSlider := AnimFlumeSlider - 1.4;
+    IF AnimFlumeSlider < 0.0 THEN AnimFlumeSlider := 0.0; END_IF
+END_IF
+IF GVL_Sensors.FlumeSensor_Open   THEN AnimFlumeSlider := 420.0; END_IF
+IF GVL_Sensors.FlumeSensor_Closed THEN AnimFlumeSlider := 0.0;   END_IF
+
+AnimFlumeWater := 420.0 - AnimFlumeSlider;
+IF AnimFlumeWater < 0.0   THEN AnimFlumeWater := 0.0;   END_IF
+IF AnimFlumeWater > 420.0 THEN AnimFlumeWater := 420.0; END_IF
+
+// -----------------------------------------------------------------------------
+// LAMPEN / STATUSANZEIGEN
+// -----------------------------------------------------------------------------
+RakeMovingAway      := GVL_Actuators.RakeFU_Enable AND GVL_Actuators.RakeFU_Away;
+RakeMovingHome      := GVL_Actuators.RakeFU_Enable AND GVL_Actuators.RakeFU_Home;
+TelescopeMovingDown := GVL_Actuators.TelescopeFU_Enable AND GVL_Actuators.TelescopeFU_Down;
+TelescopeMovingUp   := GVL_Actuators.TelescopeFU_Enable AND GVL_Actuators.TelescopeFU_Up;
+FlumeMotorActive    := GVL_Actuators.FlumeMotor_On OR GVL_Actuators.FlumeMotor_Close;
+
+// -----------------------------------------------------------------------------
+// VERRIEGELUNGEN
+// -----------------------------------------------------------------------------
+RakeActive      := RakeStation.StationState      = EnumStationState.Running;
+TelescopeActive := TelescopeStation.StationState = EnumStationState.Running;
+FlumeActive     := FlumeStation.StationState     = EnumStationState.Running;
+
+ManualButtonsEnable :=
+    GVL_Buttons.ManualMode AND
+    RakeStation.StationState      = EnumStationState.NotRunning AND
+    TelescopeStation.StationState = EnumStationState.NotRunning AND
+    FlumeStation.StationState     = EnumStationState.NotRunning;

@@ -1,0 +1,448 @@
+================================================================================
+  MAINPROGRAM — Teleskoprechenreiniger
+  CODESYS V3.5 SP21 / PIXtend V2-L Pro
+================================================================================
+
+
+// ============================================================================
+// PROGRAM MainProgram
+// VAR_OUTPUT + VAR
+// ============================================================================
+
+VAR_OUTPUT
+    AnimRakeAngle       : REAL := 0.0;
+    AnimTelescopePos    : REAL := 0.0;
+    AnimTelescopeX      : REAL := 0.0;
+    AnimTelescopeY      : REAL := 0.0;
+    AnimFlumeSlider     : REAL := 0.0;
+    AnimFlumeWater      : REAL := 420.0;
+    FaultActive         : BOOL;
+    RakeMovingAway      : BOOL;
+    RakeMovingHome      : BOOL;
+    TelescopeMovingDown : BOOL;
+    TelescopeMovingUp   : BOOL;
+    FlumeMotorActive    : BOOL;
+    RakeActive          : BOOL;
+    TelescopeActive     : BOOL;
+    FlumeActive         : BOOL;
+    ManualButtonsEnable : BOOL;
+END_VAR
+
+VAR
+    State                   : UINT;
+    HoldState               : UINT;
+    RakeStartCmd            : BOOL;
+    RakeStopCmd             : BOOL;
+    RakeHoldCmd             : BOOL;
+    TelescopeStartCmd       : BOOL;
+    TelescopeStopCmd        : BOOL;
+    TelescopeHoldCmd        : BOOL;
+    FlumeStartCmd           : BOOL;
+    FlumeStopCmd            : BOOL;
+    FlumeHoldCmd            : BOOL;
+    TimeoutError            : BOOL;
+    EndlageFehler           : BOOL;
+    HomeSeqTelescopeStarted : BOOL;
+    HomeSeqRakeStarted      : BOOL;
+    EmergencyLatched        : BOOL;
+END_VAR
+
+
+// ============================================================================
+// HAUPTCODE
+// ============================================================================
+
+// Abgeleitete Signale — immer zuerst
+GVL_Buttons.ManualMode := NOT GVL_Buttons.AutoMode;
+// HINWEIS: EmergencyButton ist NC-Kontakt (Öffner).
+// Invertierung entweder hier ODER im CODESYS I/O-Mapping — nicht beides!
+// Falls NICHT im I/O-Mapping invertiert, diese Zeile aktivieren:
+// GVL_Buttons.EmergencyButton := NOT GVL_Buttons.EmergencyButton;
+
+// Init: AutoMode aus → alles zurücksetzen
+IF NOT GVL_Buttons.AutoMode THEN
+    State                    := 0;
+    HoldState                := 0;
+    RakeStartCmd             := FALSE;
+    RakeStopCmd              := FALSE;
+    RakeHoldCmd              := FALSE;
+    TelescopeStartCmd        := FALSE;
+    TelescopeStopCmd         := FALSE;
+    TelescopeHoldCmd         := FALSE;
+    FlumeStartCmd            := FALSE;
+    FlumeStopCmd             := FALSE;
+    FlumeHoldCmd             := FALSE;
+    HomeSeqTelescopeStarted  := FALSE;
+    HomeSeqRakeStarted       := FALSE;
+    RakeStation.SetStep      := 0;
+    TelescopeStation.SetStep := 0;
+    AnimRakeAngle            := 0.0;
+    AnimTelescopePos         := 0.0;
+    AnimTelescopeX           := 0.0;
+    AnimTelescopeY           := 0.0;
+    AnimFlumeSlider          := 0.0;
+    AnimFlumeWater           := 420.0;
+END_IF
+
+MainFaults_Action();
+StationCall_Action();
+GenericDevicesCall_Action();
+
+CASE State OF
+
+    // -------------------------------------------------------------------------
+    // State 0: Ruhezustand
+    // -------------------------------------------------------------------------
+    0:
+        RakeStartCmd             := FALSE;
+        RakeStopCmd              := FALSE;
+        RakeHoldCmd              := FALSE;
+        TelescopeStartCmd        := FALSE;
+        TelescopeStopCmd         := FALSE;
+        TelescopeHoldCmd         := FALSE;
+        FlumeStartCmd            := FALSE;
+        FlumeStopCmd             := FALSE;
+        FlumeHoldCmd             := FALSE;
+        HoldState                := 0;
+        RakeStation.SetStep      := 0;
+        TelescopeStation.SetStep := 0;
+        HomeSeqTelescopeStarted  := FALSE;
+        HomeSeqRakeStarted       := FALSE;
+
+        IF RakeStation.StationState <> EnumStationState.NotRunning THEN
+            RakeStopCmd := TRUE;
+        END_IF
+        IF TelescopeStation.StationState <> EnumStationState.NotRunning THEN
+            TelescopeStopCmd := TRUE;
+        END_IF
+        IF FlumeStation.StationState <> EnumStationState.NotRunning THEN
+            FlumeStopCmd := TRUE;
+        END_IF
+
+        IF RakeStation.StationState      = EnumStationState.NotRunning AND
+           TelescopeStation.StationState = EnumStationState.NotRunning AND
+           FlumeStation.StationState     = EnumStationState.NotRunning THEN
+            RakeStopCmd      := FALSE;
+            TelescopeStopCmd := FALSE;
+            FlumeStopCmd     := FALSE;
+
+            IF GVL_Buttons.StartButton
+               AND NOT GVL_Buttons.StopButton
+               AND NOT GVL_Buttons.EmergencyButton
+               AND NOT GVL_Buttons.HoldButton
+               AND NOT TimeoutError
+               AND NOT EndlageFehler
+               AND NOT EmergencyLatched
+               AND GVL_Buttons.AutoMode THEN
+                RakeStartCmd := TRUE;
+                State := 10;
+            END_IF
+        END_IF
+
+    // -------------------------------------------------------------------------
+    // Normaler Produktionsablauf
+    // -------------------------------------------------------------------------
+    10:
+        IF RakeStation.StationStep = 100 THEN
+            RakeStartCmd      := FALSE;
+            TelescopeStartCmd := TRUE;
+            State := 20;
+        END_IF
+
+    20:
+        IF TelescopeStation.StationStep = 200 THEN
+            TelescopeStartCmd        := FALSE;
+            RakeStation.SetStep      := 30;
+            State := 30;
+        END_IF
+
+    30:
+        RakeStation.SetStep := 0;
+        IF RakeStation.StationStep = 200 THEN
+            TelescopeStation.SetStep := 50;
+            State := 50;
+        END_IF
+
+    50:
+        TelescopeStation.SetStep := 0;
+        IF TelescopeStation.StationStep = 300 THEN
+            FlumeStartCmd := TRUE;
+            State := 60;
+        END_IF
+
+    60:
+        FlumeStartCmd := FALSE;
+        IF FlumeStation.StationState = EnumStationState.NotRunning THEN
+            State := 0;
+        END_IF
+
+    // -------------------------------------------------------------------------
+    // State 500/510: HOLD — Resume über StartButton
+    // -------------------------------------------------------------------------
+    500:
+        RakeHoldCmd      := FALSE;
+        TelescopeHoldCmd := FALSE;
+        FlumeHoldCmd     := FALSE;
+
+        IF RakeStation.StationState      = EnumStationState.Holding AND
+           TelescopeStation.StationState = EnumStationState.Holding AND
+           (FlumeStation.StationState    = EnumStationState.Holding OR
+            FlumeStation.StationState    = EnumStationState.NotRunning) THEN
+            IF GVL_Buttons.StartButton
+               AND NOT GVL_Buttons.StopButton
+               AND NOT GVL_Buttons.EmergencyButton
+               AND NOT GVL_Buttons.HoldButton THEN
+                RakeHoldCmd      := TRUE;
+                TelescopeHoldCmd := TRUE;
+                FlumeHoldCmd     := TRUE;
+                State := 510;
+            END_IF
+        END_IF
+
+    510:
+        RakeHoldCmd      := FALSE;
+        TelescopeHoldCmd := FALSE;
+        FlumeHoldCmd     := FALSE;
+        IF RakeStation.StationState = EnumStationState.Running OR
+           RakeStation.StationState = EnumStationState.NotRunning THEN
+            State     := HoldState;
+            HoldState := 0;
+        END_IF
+
+    // -------------------------------------------------------------------------
+    // State 1000–1020: STOP → Grundstellungsfahrt
+    // -------------------------------------------------------------------------
+    1000:
+        FlumeStopCmd := TRUE;
+        IF FlumeStation.StationState = EnumStationState.NotRunning THEN
+            FlumeStopCmd := FALSE;
+            State := 1010;
+        END_IF
+
+    1010:
+        IF NOT HomeSeqTelescopeStarted THEN
+            IF TelescopeStation.StationState = EnumStationState.NotRunning THEN
+                TelescopeStartCmd       := TRUE;
+                HomeSeqTelescopeStarted := TRUE;
+            ELSE
+                TelescopeStation.SetStep := 50;
+                HomeSeqTelescopeStarted  := TRUE;
+            END_IF
+        END_IF
+        IF HomeSeqTelescopeStarted AND TelescopeStation.StationStep = 20 THEN
+            TelescopeStartCmd        := FALSE;
+            TelescopeStation.SetStep := 50;
+        END_IF
+        IF TelescopeStation.StationStep = 300 OR
+           (TelescopeStation.StationState = EnumStationState.NotRunning AND
+            GVL_Sensors.ExtenderSensor_Up) THEN
+            TelescopeStartCmd := FALSE;
+            State := 1020;
+        END_IF
+
+    1020:
+        IF NOT HomeSeqRakeStarted THEN
+            IF RakeStation.StationState = EnumStationState.NotRunning THEN
+                RakeStartCmd       := TRUE;
+                HomeSeqRakeStarted := TRUE;
+            ELSE
+                RakeStation.SetStep := 30;
+                HomeSeqRakeStarted  := TRUE;
+            END_IF
+        END_IF
+        IF HomeSeqRakeStarted AND RakeStation.StationStep = 10 THEN
+            RakeStartCmd        := FALSE;
+            RakeStation.SetStep := 30;
+        END_IF
+        IF RakeStation.StationStep = 200 OR
+           (RakeStation.StationState = EnumStationState.NotRunning AND
+            GVL_Sensors.RakeFCN_Home) THEN
+            RakeStartCmd            := FALSE;
+            HomeSeqTelescopeStarted := FALSE;
+            HomeSeqRakeStarted      := FALSE;
+            State := 0;
+        END_IF
+
+END_CASE
+
+// =============================================================================
+// GLOBALE BUTTON-BEHANDLUNG
+// Priorität: Emergency > Stop > Hold
+// =============================================================================
+
+// NOT-AUS
+IF GVL_Buttons.EmergencyButton THEN
+    RakeStartCmd             := FALSE;
+    TelescopeStartCmd        := FALSE;
+    FlumeStartCmd            := FALSE;
+    RakeStopCmd              := FALSE;
+    TelescopeStopCmd         := FALSE;
+    FlumeStopCmd             := FALSE;
+    RakeHoldCmd              := FALSE;
+    TelescopeHoldCmd         := FALSE;
+    FlumeHoldCmd             := FALSE;
+    RakeStation.SetStep      := 0;
+    TelescopeStation.SetStep := 0;
+    HomeSeqTelescopeStarted  := FALSE;
+    HomeSeqRakeStarted       := FALSE;
+    HoldState                := 0;
+    EmergencyLatched         := TRUE;
+    State                    := 0;
+END_IF
+
+// STOP → Grundstellungsfahrt
+IF GVL_Buttons.StopButton
+   AND State <> 0
+   AND State <> 1000 AND State <> 1010 AND State <> 1020 THEN
+    FlumeStopCmd             := TRUE;
+    RakeStation.SetStep      := 0;
+    TelescopeStation.SetStep := 0;
+    HoldState                := 0;
+    HomeSeqTelescopeStarted  := FALSE;
+    HomeSeqRakeStarted       := FALSE;
+    State                    := 1000;
+END_IF
+
+// HOLD → Resume über StartButton
+IF GVL_Buttons.HoldButton
+   AND State <> 0
+   AND State <> 500  AND State <> 510
+   AND State <> 1000 AND State <> 1010 AND State <> 1020 THEN
+    RakeHoldCmd      := TRUE;
+    TelescopeHoldCmd := TRUE;
+    FlumeHoldCmd     := TRUE;
+    HoldState        := State;
+    State            := 500;
+END_IF
+
+
+// ============================================================================
+// MainFaults_Action
+// ============================================================================
+
+IF GVL_Sensors.RakeFCN_Away AND GVL_Sensors.RakeFCN_Home THEN
+    EndlageFehler := TRUE;
+ELSIF GVL_Sensors.ExtenderSensor_Down AND GVL_Sensors.ExtenderSensor_Up THEN
+    EndlageFehler := TRUE;
+ELSIF GVL_Sensors.FlumeSensor_Open AND GVL_Sensors.FlumeSensor_Closed THEN
+    EndlageFehler := TRUE;
+ELSE
+    IF NOT TimeoutError THEN EndlageFehler := FALSE; END_IF
+END_IF
+
+IF RakeStation.TimeoutError OR TelescopeStation.TimeoutError OR
+   FlumeStation.TimeoutError THEN
+    TimeoutError := TRUE;
+END_IF
+
+FaultActive := TimeoutError OR EndlageFehler OR EmergencyLatched;
+
+IF GVL_Buttons.EmergencyButton THEN
+    FaultActive := TRUE;
+END_IF
+
+// Animationen
+IF GVL_Actuators.RakeFU_Enable THEN
+    IF GVL_Actuators.RakeFU_Away THEN
+        AnimRakeAngle := AnimRakeAngle + 0.3;
+        IF AnimRakeAngle > 10.0 THEN AnimRakeAngle := 10.0; END_IF
+    ELSIF GVL_Actuators.RakeFU_Home THEN
+        AnimRakeAngle := AnimRakeAngle - 0.3;
+        IF AnimRakeAngle < 0.0 THEN AnimRakeAngle := 0.0; END_IF
+    END_IF
+END_IF
+IF GVL_Sensors.RakeFCN_Away THEN AnimRakeAngle := 10.0; END_IF
+IF GVL_Sensors.RakeFCN_Home THEN AnimRakeAngle := 0.0;  END_IF
+
+IF GVL_Actuators.TelescopeFU_Enable THEN
+    IF GVL_Actuators.TelescopeFU_Down THEN
+        AnimTelescopePos := AnimTelescopePos + 1.5;
+        IF AnimTelescopePos > 260.0 THEN AnimTelescopePos := 260.0; END_IF
+    ELSIF GVL_Actuators.TelescopeFU_Up THEN
+        AnimTelescopePos := AnimTelescopePos - 1.5;
+        IF AnimTelescopePos < 0.0 THEN AnimTelescopePos := 0.0; END_IF
+    END_IF
+END_IF
+IF GVL_Sensors.ExtenderSensor_Down THEN AnimTelescopePos := 260.0; END_IF
+IF GVL_Sensors.ExtenderSensor_Up   THEN AnimTelescopePos := 0.0;   END_IF
+
+IF GVL_Sensors.RakeFCN_Away OR GVL_Actuators.RakeFU_Away THEN
+    AnimTelescopeX := AnimTelescopePos * (-0.648);
+    AnimTelescopeY := AnimTelescopePos * 0.648;
+ELSE
+    AnimTelescopeX := AnimTelescopePos * 0.707;
+    AnimTelescopeY := AnimTelescopePos * (-0.707);
+END_IF
+
+IF GVL_Actuators.FlumeMotor_On AND NOT GVL_Actuators.FlumeMotor_Close THEN
+    AnimFlumeSlider := AnimFlumeSlider + 1.4;
+    IF AnimFlumeSlider > 420.0 THEN AnimFlumeSlider := 420.0; END_IF
+ELSIF GVL_Actuators.FlumeMotor_Close AND NOT GVL_Actuators.FlumeMotor_On THEN
+    AnimFlumeSlider := AnimFlumeSlider - 1.4;
+    IF AnimFlumeSlider < 0.0 THEN AnimFlumeSlider := 0.0; END_IF
+END_IF
+IF GVL_Sensors.FlumeSensor_Open   THEN AnimFlumeSlider := 420.0; END_IF
+IF GVL_Sensors.FlumeSensor_Closed THEN AnimFlumeSlider := 0.0;   END_IF
+
+AnimFlumeWater := 420.0 - AnimFlumeSlider;
+IF AnimFlumeWater < 0.0   THEN AnimFlumeWater := 0.0;   END_IF
+IF AnimFlumeWater > 420.0 THEN AnimFlumeWater := 420.0; END_IF
+
+RakeMovingAway      := GVL_Actuators.RakeFU_Enable AND GVL_Actuators.RakeFU_Away;
+RakeMovingHome      := GVL_Actuators.RakeFU_Enable AND GVL_Actuators.RakeFU_Home;
+TelescopeMovingDown := GVL_Actuators.TelescopeFU_Enable AND GVL_Actuators.TelescopeFU_Down;
+TelescopeMovingUp   := GVL_Actuators.TelescopeFU_Enable AND GVL_Actuators.TelescopeFU_Up;
+FlumeMotorActive    := GVL_Actuators.FlumeMotor_On OR GVL_Actuators.FlumeMotor_Close;
+
+RakeActive      := RakeStation.StationState      = EnumStationState.Running;
+TelescopeActive := TelescopeStation.StationState = EnumStationState.Running;
+FlumeActive     := FlumeStation.StationState     = EnumStationState.Running;
+
+ManualButtonsEnable :=
+    GVL_Buttons.ManualMode AND
+    RakeStation.StationState      = EnumStationState.NotRunning AND
+    TelescopeStation.StationState = EnumStationState.NotRunning AND
+    FlumeStation.StationState     = EnumStationState.NotRunning;
+
+
+// ============================================================================
+// StationCall_Action
+// ============================================================================
+
+RakeStation(
+    Start      := RakeStartCmd,
+    Stop       := RakeStopCmd,
+    Hold       := RakeHoldCmd,
+    Emergency  := GVL_Buttons.EmergencyButton,
+    ResetError := GVL_Buttons.ResetButton,
+    SetStep    := RakeStation.SetStep
+);
+
+TelescopeStation(
+    Start      := TelescopeStartCmd,
+    Stop       := TelescopeStopCmd,
+    Hold       := TelescopeHoldCmd,
+    Emergency  := GVL_Buttons.EmergencyButton,
+    ResetError := GVL_Buttons.ResetButton,
+    SetStep    := TelescopeStation.SetStep
+);
+
+FlumeStation(
+    Start      := FlumeStartCmd,
+    Stop       := FlumeStopCmd,
+    Hold       := FlumeHoldCmd,
+    Emergency  := GVL_Buttons.EmergencyButton,
+    ResetError := GVL_Buttons.ResetButton
+);
+
+// RESET — Fehler quittieren
+IF GVL_Buttons.ResetButton AND NOT GVL_Buttons.EmergencyButton THEN
+    IF RakeStation.StationState      = EnumStationState.NotRunning AND
+       TelescopeStation.StationState = EnumStationState.NotRunning AND
+       FlumeStation.StationState     = EnumStationState.NotRunning THEN
+        TimeoutError     := FALSE;
+        EndlageFehler    := FALSE;
+        FaultActive      := FALSE;
+        EmergencyLatched := FALSE;
+    END_IF
+END_IF

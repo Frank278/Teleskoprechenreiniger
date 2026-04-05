@@ -1,0 +1,326 @@
+// =============================================================================
+// PROGRAM RakeStation
+// ÄNDERUNG: RakeFU_Speed Werte von PWM-% auf AO-Volt umgestellt (÷10)
+//   War: 50.0 (PWM 50%) → Neu: 5.0 (AO 5.0V = 50% von 10V)
+//   War: 30.0 (PWM 30%) → Neu: 3.0 (AO 3.0V = 30% von 10V)
+// =============================================================================
+
+VAR_INPUT
+    Start           : BOOL;
+    Stop            : BOOL;
+    Hold            : BOOL;
+    Emergency       : BOOL;
+    ResetError      : BOOL;
+    SetStep         : UINT;
+END_VAR
+VAR_OUTPUT
+    StationState    : EnumStationState;
+    StationStep     : UINT;
+    TimeoutError    : BOOL;
+END_VAR
+VAR
+    HoldState               : UINT;
+    HoldRequest             : BOOL;
+    RakeDevice              : FB_GenericDevice;
+    BrakeReleaseTimer       : TON;
+    BrakeApplyTimer         : TON;
+    TimeoutTimer            : TON;
+    TransitionTimer         : TON;
+    BrakeReleaseTime        : TIME := T#500MS;
+    BrakeApplyTime          : TIME := T#300MS;
+    RakeTimeout             : TIME := T#30S;
+    TransitionTime          : TIME := T#2S;
+    ManualSpeed             : REAL := 3.0;   // NEU: 3.0V (war 0.0)
+    ManualRakeBrakeReleased : BOOL;
+END_VAR
+
+// Externer Step-Befehl
+IF SetStep <> 0 THEN
+    StationStep := SetStep;
+    SetStep     := 0;
+END_IF
+
+// =============================================================================
+// AUTOMATIK
+// =============================================================================
+IF NOT GVL_Buttons.ManualMode THEN
+
+CASE StationStep OF
+
+    0:
+        BrakeReleaseTimer.IN        := FALSE;
+        BrakeApplyTimer.IN          := FALSE;
+        TimeoutTimer.IN             := FALSE;
+        TransitionTimer.IN          := FALSE;
+        GVL_Actuators.RakeFU_Enable := FALSE;
+        GVL_Actuators.RakeFU_Away   := FALSE;
+        GVL_Actuators.RakeFU_Home   := FALSE;
+        GVL_Actuators.RakeFU_Speed  := 0.0;
+        GVL_Actuators.RakeBrake     := FALSE;
+        RakeDevice.EnableGenericDevice := FALSE;
+        RakeDevice.DeviceCmd           := FALSE;
+        IF Start THEN
+            RakeDevice.EnableGenericDevice := TRUE;
+            StationStep := 10;
+        END_IF
+
+    // Bremse lösen (Schwenk WEG)
+    10:
+        GVL_Actuators.RakeBrake  := TRUE;
+        BrakeReleaseTimer.PT     := BrakeReleaseTime;
+        BrakeReleaseTimer.IN     := TRUE;
+        IF BrakeReleaseTimer.Q THEN
+            BrakeReleaseTimer.IN := FALSE;
+            StationStep := 11;
+        END_IF
+
+    // Schwenken WEG bis RakeFCN_Away
+    11:
+        GVL_Actuators.RakeBrake     := TRUE;
+        GVL_Actuators.RakeFU_Enable := TRUE;
+        GVL_Actuators.RakeFU_Away   := TRUE;
+        GVL_Actuators.RakeFU_Home   := FALSE;
+        GVL_Actuators.RakeFU_Speed  := 5.0;   // NEU: 5.0V (war 50.0%)
+        RakeDevice.DeviceCmd        := TRUE;
+        TimeoutTimer.PT             := RakeTimeout;
+        TimeoutTimer.IN             := TRUE;
+        IF GVL_Sensors.RakeFCN_Away THEN
+            TimeoutTimer.IN := FALSE;
+            StationStep := 12;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Motor stoppen, Bremse anziehen
+    12:
+        GVL_Actuators.RakeFU_Enable := FALSE;
+        GVL_Actuators.RakeFU_Away   := FALSE;
+        GVL_Actuators.RakeFU_Speed  := 0.0;
+        RakeDevice.DeviceCmd        := FALSE;
+        BrakeApplyTimer.PT          := BrakeApplyTime;
+        BrakeApplyTimer.IN          := TRUE;
+        IF BrakeApplyTimer.Q THEN
+            GVL_Actuators.RakeBrake := FALSE;
+            BrakeApplyTimer.IN      := FALSE;
+            StationStep := 15;
+        END_IF
+
+    // Pause vor Übergabe an Telescope
+    15:
+        TransitionTimer.PT := TransitionTime;
+        TransitionTimer.IN := TRUE;
+        IF TransitionTimer.Q THEN
+            TransitionTimer.IN := FALSE;
+            StationStep := 100;
+        END_IF
+
+    // Warten auf SetStep := 30 von MainProgram
+    100:
+        ;
+
+    // Bremse lösen (Schwenk HOME)
+    30:
+        GVL_Actuators.RakeBrake  := TRUE;
+        BrakeReleaseTimer.PT     := BrakeReleaseTime;
+        BrakeReleaseTimer.IN     := TRUE;
+        IF BrakeReleaseTimer.Q THEN
+            BrakeReleaseTimer.IN := FALSE;
+            StationStep := 31;
+        END_IF
+
+    // Schwenken HOME bis RakeFCN_Home
+    31:
+        GVL_Actuators.RakeBrake     := TRUE;
+        GVL_Actuators.RakeFU_Enable := TRUE;
+        GVL_Actuators.RakeFU_Away   := FALSE;
+        GVL_Actuators.RakeFU_Home   := TRUE;
+        GVL_Actuators.RakeFU_Speed  := 3.0;   // NEU: 3.0V (war 30.0%)
+        RakeDevice.DeviceCmd        := FALSE;
+        TimeoutTimer.PT             := RakeTimeout;
+        TimeoutTimer.IN             := TRUE;
+        IF GVL_Sensors.RakeFCN_Home THEN
+            TimeoutTimer.IN := FALSE;
+            StationStep := 32;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Motor stoppen, Bremse anziehen
+    32:
+        GVL_Actuators.RakeFU_Enable := FALSE;
+        GVL_Actuators.RakeFU_Home   := FALSE;
+        GVL_Actuators.RakeFU_Speed  := 0.0;
+        BrakeApplyTimer.PT          := BrakeApplyTime;
+        BrakeApplyTimer.IN          := TRUE;
+        IF BrakeApplyTimer.Q THEN
+            GVL_Actuators.RakeBrake := FALSE;
+            BrakeApplyTimer.IN      := FALSE;
+            StationStep := 35;
+        END_IF
+
+    // Pause
+    35:
+        TransitionTimer.PT := TransitionTime;
+        TransitionTimer.IN := TRUE;
+        IF TransitionTimer.Q THEN
+            TransitionTimer.IN := FALSE;
+            StationStep := 200;
+        END_IF
+
+    // Warten auf SetStep von MainProgram
+    200:
+        ;
+
+    500:
+        IF NOT Hold THEN
+            StationStep := HoldState;
+            HoldState   := 0;
+        END_IF
+
+    1000:
+        RakeDevice.DeviceCmd           := FALSE;
+        GVL_Actuators.RakeFU_Enable    := FALSE;
+        GVL_Actuators.RakeFU_Away      := FALSE;
+        GVL_Actuators.RakeFU_Home      := FALSE;
+        GVL_Actuators.RakeFU_Speed     := 0.0;
+        GVL_Actuators.RakeBrake        := FALSE;
+        RakeDevice.EnableGenericDevice := FALSE;
+        StationStep := 0;
+
+END_CASE
+
+IF StationStep <> 0 AND Emergency THEN
+    GVL_Actuators.RakeFU_Enable    := FALSE;
+    GVL_Actuators.RakeFU_Away      := FALSE;
+    GVL_Actuators.RakeFU_Home      := FALSE;
+    GVL_Actuators.RakeFU_Speed     := 0.0;
+    GVL_Actuators.RakeBrake        := FALSE;
+    RakeDevice.DeviceCmd           := FALSE;
+    RakeDevice.EnableGenericDevice := FALSE;
+    StationStep := 0;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 1000 AND Stop THEN
+    StationStep := 1000;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 500 AND StationStep <> 1000 AND Hold THEN
+    HoldRequest := TRUE;
+END_IF
+IF StationStep <> 500  AND
+   StationStep <> 10   AND StationStep <> 12  AND
+   StationStep <> 30   AND StationStep <> 32  AND
+   StationStep <> 15   AND StationStep <> 35  AND
+   HoldRequest THEN
+    HoldRequest := FALSE;
+    HoldState   := StationStep;
+    StationStep := 500;
+END_IF
+
+END_IF
+
+// =============================================================================
+// MANUELL
+// =============================================================================
+IF GVL_Buttons.ManualMode THEN
+    RakeDevice.EnableGenericDevice := TRUE;
+
+    IF GVL_Buttons.ManualRakeAway AND NOT GVL_Buttons.ManualRakeHome
+       AND NOT Emergency AND NOT GVL_Sensors.RakeFCN_Away THEN
+        IF NOT ManualRakeBrakeReleased THEN
+            GVL_Actuators.RakeBrake  := TRUE;
+            BrakeReleaseTimer.PT     := BrakeReleaseTime;
+            BrakeReleaseTimer.IN     := TRUE;
+            IF BrakeReleaseTimer.Q THEN
+                ManualRakeBrakeReleased := TRUE;
+                BrakeReleaseTimer.IN    := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.RakeBrake     := TRUE;
+            GVL_Actuators.RakeFU_Enable := TRUE;
+            GVL_Actuators.RakeFU_Away   := TRUE;
+            GVL_Actuators.RakeFU_Home   := FALSE;
+            GVL_Actuators.RakeFU_Speed  := ManualSpeed;
+            RakeDevice.DeviceCmd        := TRUE;
+        END_IF
+
+    ELSIF GVL_Buttons.ManualRakeHome AND NOT GVL_Buttons.ManualRakeAway
+          AND NOT Emergency AND NOT GVL_Sensors.RakeFCN_Home THEN
+        IF NOT ManualRakeBrakeReleased THEN
+            GVL_Actuators.RakeBrake  := TRUE;
+            BrakeReleaseTimer.PT     := BrakeReleaseTime;
+            BrakeReleaseTimer.IN     := TRUE;
+            IF BrakeReleaseTimer.Q THEN
+                ManualRakeBrakeReleased := TRUE;
+                BrakeReleaseTimer.IN    := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.RakeBrake     := TRUE;
+            GVL_Actuators.RakeFU_Enable := TRUE;
+            GVL_Actuators.RakeFU_Away   := FALSE;
+            GVL_Actuators.RakeFU_Home   := TRUE;
+            GVL_Actuators.RakeFU_Speed  := ManualSpeed;
+            RakeDevice.DeviceCmd        := FALSE;
+        END_IF
+
+    ELSE
+        IF ManualRakeBrakeReleased THEN
+            GVL_Actuators.RakeFU_Enable := FALSE;
+            GVL_Actuators.RakeFU_Away   := FALSE;
+            GVL_Actuators.RakeFU_Home   := FALSE;
+            GVL_Actuators.RakeFU_Speed  := 0.0;
+            BrakeApplyTimer.PT          := BrakeApplyTime;
+            BrakeApplyTimer.IN          := TRUE;
+            IF BrakeApplyTimer.Q THEN
+                GVL_Actuators.RakeBrake     := FALSE;
+                ManualRakeBrakeReleased     := FALSE;
+                BrakeApplyTimer.IN          := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.RakeFU_Enable := FALSE;
+            GVL_Actuators.RakeFU_Away   := FALSE;
+            GVL_Actuators.RakeFU_Home   := FALSE;
+            GVL_Actuators.RakeFU_Speed  := 0.0;
+            GVL_Actuators.RakeBrake     := FALSE;
+        END_IF
+    END_IF
+
+    IF Emergency THEN
+        GVL_Actuators.RakeFU_Enable    := FALSE;
+        GVL_Actuators.RakeFU_Away      := FALSE;
+        GVL_Actuators.RakeFU_Home      := FALSE;
+        GVL_Actuators.RakeFU_Speed     := 0.0;
+        GVL_Actuators.RakeBrake        := FALSE;
+        RakeDevice.DeviceCmd           := FALSE;
+        ManualRakeBrakeReleased        := FALSE;
+        RakeDevice.EnableGenericDevice := FALSE;
+    END_IF
+END_IF
+
+IF GVL_Buttons.ManualMode THEN
+    StationState := EnumStationState.Manual;
+ELSIF StationStep = 0    THEN StationState := EnumStationState.NotRunning;
+ELSIF StationStep = 500  THEN StationState := EnumStationState.Holding;
+ELSIF StationStep = 1000 THEN StationState := EnumStationState.Stopping;
+ELSE                          StationState := EnumStationState.Running;
+END_IF
+
+IF ResetError THEN TimeoutError := FALSE; END_IF
+
+BrakeReleaseTimer(IN:= BrakeReleaseTimer.IN, PT:= BrakeReleaseTimer.PT);
+BrakeApplyTimer  (IN:= BrakeApplyTimer.IN,   PT:= BrakeApplyTimer.PT);
+TimeoutTimer     (IN:= TimeoutTimer.IN,       PT:= TimeoutTimer.PT);
+TransitionTimer  (IN:= TransitionTimer.IN,    PT:= TransitionTimer.PT);
+
+RakeDevice(
+    EnableGenericDevice    := RakeDevice.EnableGenericDevice,
+    DeviceCmd              := RakeDevice.DeviceCmd,
+    FeedbackType           := EnumFeedbackType.NoFeedback,
+    ActuationType          := EnumActuationType.SingleActuation,
+    DeviceActivationTime   := T#2S,
+    DeviceDeactivationTime := T#2S
+);

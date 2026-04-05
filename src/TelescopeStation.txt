@@ -1,0 +1,332 @@
+// =============================================================================
+// PROGRAM TelescopeStation
+// ÄNDERUNG: TelescopeFU_Speed Werte von PWM-% auf AO-Volt umgestellt (÷10)
+//   War: 40.0 (PWM 40%) → Neu: 4.0 (AO 4.0V = 40% von 10V)
+// =============================================================================
+
+VAR_INPUT
+    Start           : BOOL;
+    Stop            : BOOL;
+    Hold            : BOOL;
+    Emergency       : BOOL;
+    ResetError      : BOOL;
+    SetStep         : UINT;
+END_VAR
+VAR_OUTPUT
+    StationState    : EnumStationState;
+    StationStep     : UINT;
+    TimeoutError    : BOOL;
+END_VAR
+VAR
+    HoldState                    : UINT;
+    HoldRequest                  : BOOL;
+    TelescopeDevice              : FB_GenericDevice;
+    BrakeReleaseTimer            : TON;
+    BrakeApplyTimer              : TON;
+    TimeoutTimer                 : TON;
+    TransitionTimer              : TON;
+    BrakeReleaseTime             : TIME := T#500MS;
+    BrakeApplyTime               : TIME := T#300MS;
+    TelescopeTimeout             : TIME := T#45S;
+    TransitionTime               : TIME := T#2S;
+    ManualSpeed                  : REAL := 2.0;   // NEU: 2.0V (war 20.0%)
+    ManualTelescopeBrakeReleased : BOOL;
+END_VAR
+
+// Externer Step-Befehl
+IF SetStep <> 0 THEN
+    StationStep := SetStep;
+    SetStep     := 0;
+END_IF
+
+// =============================================================================
+// AUTOMATIK
+// =============================================================================
+IF NOT GVL_Buttons.ManualMode THEN
+
+CASE StationStep OF
+
+    0:
+        BrakeReleaseTimer.IN             := FALSE;
+        BrakeApplyTimer.IN               := FALSE;
+        TimeoutTimer.IN                  := FALSE;
+        TransitionTimer.IN               := FALSE;
+        GVL_Actuators.TelescopeFU_Enable := FALSE;
+        GVL_Actuators.TelescopeFU_Down   := FALSE;
+        GVL_Actuators.TelescopeFU_Up     := FALSE;
+        GVL_Actuators.TelescopeFU_Speed  := 0.0;
+        GVL_Actuators.TelescopeBrake     := FALSE;
+        TelescopeDevice.EnableGenericDevice := FALSE;
+        TelescopeDevice.DeviceCmd           := FALSE;
+        IF NOT GVL_Sensors.ExtenderSensor_Up THEN
+            GVL_Actuators.TelescopeBrake := TRUE;
+        ELSE
+            GVL_Actuators.TelescopeBrake := FALSE;
+        END_IF
+        IF Start THEN
+            TelescopeDevice.EnableGenericDevice := TRUE;
+            StationStep := 20;
+        END_IF
+
+    // Bremse lösen (Teleskop runter)
+    20:
+        GVL_Actuators.TelescopeBrake := TRUE;
+        BrakeReleaseTimer.PT         := BrakeReleaseTime;
+        BrakeReleaseTimer.IN         := TRUE;
+        IF BrakeReleaseTimer.Q THEN
+            BrakeReleaseTimer.IN := FALSE;
+            StationStep := 21;
+        END_IF
+
+    // Teleskop ausfahren bis ExtenderSensor_Down
+    21:
+        GVL_Actuators.TelescopeBrake     := TRUE;
+        GVL_Actuators.TelescopeFU_Enable := TRUE;
+        GVL_Actuators.TelescopeFU_Down   := TRUE;
+        GVL_Actuators.TelescopeFU_Up     := FALSE;
+        GVL_Actuators.TelescopeFU_Speed  := 4.0;   // NEU: 4.0V (war 40.0%)
+        TelescopeDevice.DeviceCmd        := TRUE;
+        TimeoutTimer.PT                  := TelescopeTimeout;
+        TimeoutTimer.IN                  := TRUE;
+        IF GVL_Sensors.ExtenderSensor_Down THEN
+            TimeoutTimer.IN := FALSE;
+            StationStep := 22;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Motor stoppen, Bremse anziehen
+    22:
+        GVL_Actuators.TelescopeFU_Enable := FALSE;
+        GVL_Actuators.TelescopeFU_Down   := FALSE;
+        GVL_Actuators.TelescopeFU_Speed  := 0.0;
+        TelescopeDevice.DeviceCmd        := FALSE;
+        BrakeApplyTimer.PT               := BrakeApplyTime;
+        BrakeApplyTimer.IN               := TRUE;
+        IF BrakeApplyTimer.Q THEN
+            GVL_Actuators.TelescopeBrake := FALSE;
+            BrakeApplyTimer.IN           := FALSE;
+            StationStep := 25;
+        END_IF
+
+    // Pause
+    25:
+        TransitionTimer.PT := TransitionTime;
+        TransitionTimer.IN := TRUE;
+        IF TransitionTimer.Q THEN
+            TransitionTimer.IN := FALSE;
+            StationStep := 200;
+        END_IF
+
+    // Warten auf SetStep := 50
+    200:
+        ;
+
+    // Bremse lösen (Teleskop rauf)
+    50:
+        GVL_Actuators.TelescopeBrake := TRUE;
+        BrakeReleaseTimer.PT         := BrakeReleaseTime;
+        BrakeReleaseTimer.IN         := TRUE;
+        IF BrakeReleaseTimer.Q THEN
+            BrakeReleaseTimer.IN := FALSE;
+            StationStep := 51;
+        END_IF
+
+    // Teleskop einfahren bis ExtenderSensor_Up
+    51:
+        GVL_Actuators.TelescopeBrake     := TRUE;
+        GVL_Actuators.TelescopeFU_Enable := TRUE;
+        GVL_Actuators.TelescopeFU_Down   := FALSE;
+        GVL_Actuators.TelescopeFU_Up     := TRUE;
+        GVL_Actuators.TelescopeFU_Speed  := 4.0;   // NEU: 4.0V (war 40.0%)
+        TelescopeDevice.DeviceCmd        := FALSE;
+        TimeoutTimer.PT                  := TelescopeTimeout;
+        TimeoutTimer.IN                  := TRUE;
+        IF GVL_Sensors.ExtenderSensor_Up THEN
+            TimeoutTimer.IN := FALSE;
+            StationStep := 52;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Motor stoppen, Bremse anziehen
+    52:
+        GVL_Actuators.TelescopeFU_Enable := FALSE;
+        GVL_Actuators.TelescopeFU_Up     := FALSE;
+        GVL_Actuators.TelescopeFU_Speed  := 0.0;
+        TelescopeDevice.DeviceCmd        := FALSE;
+        BrakeApplyTimer.PT               := BrakeApplyTime;
+        BrakeApplyTimer.IN               := TRUE;
+        IF BrakeApplyTimer.Q THEN
+            GVL_Actuators.TelescopeBrake := FALSE;
+            BrakeApplyTimer.IN           := FALSE;
+            StationStep := 55;
+        END_IF
+
+    // Pause
+    55:
+        TransitionTimer.PT := TransitionTime;
+        TransitionTimer.IN := TRUE;
+        IF TransitionTimer.Q THEN
+            TransitionTimer.IN := FALSE;
+            StationStep := 300;
+        END_IF
+
+    // Fertig
+    300:
+        ;
+
+    500:
+        IF NOT Hold THEN
+            StationStep := HoldState;
+            HoldState   := 0;
+        END_IF
+
+    1000:
+        TelescopeDevice.DeviceCmd           := FALSE;
+        GVL_Actuators.TelescopeFU_Enable    := FALSE;
+        GVL_Actuators.TelescopeFU_Down      := FALSE;
+        GVL_Actuators.TelescopeFU_Up        := FALSE;
+        GVL_Actuators.TelescopeFU_Speed     := 0.0;
+        GVL_Actuators.TelescopeBrake        := FALSE;
+        TelescopeDevice.EnableGenericDevice := FALSE;
+        StationStep := 0;
+
+END_CASE
+
+IF StationStep <> 0 AND Emergency THEN
+    GVL_Actuators.TelescopeFU_Enable    := FALSE;
+    GVL_Actuators.TelescopeFU_Down      := FALSE;
+    GVL_Actuators.TelescopeFU_Up        := FALSE;
+    GVL_Actuators.TelescopeFU_Speed     := 0.0;
+    GVL_Actuators.TelescopeBrake        := FALSE;
+    TelescopeDevice.DeviceCmd           := FALSE;
+    TelescopeDevice.EnableGenericDevice := FALSE;
+    StationStep := 0;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 1000 AND Stop THEN
+    StationStep := 1000;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 500 AND StationStep <> 1000 AND Hold THEN
+    HoldRequest := TRUE;
+END_IF
+IF StationStep <> 500  AND
+   StationStep <> 20   AND StationStep <> 22  AND
+   StationStep <> 21   AND StationStep <> 51  AND
+   StationStep <> 50   AND StationStep <> 52  AND
+   StationStep <> 25   AND StationStep <> 55  AND
+   HoldRequest THEN
+    HoldRequest := FALSE;
+    HoldState   := StationStep;
+    StationStep := 500;
+END_IF
+
+END_IF
+
+// =============================================================================
+// MANUELL
+// =============================================================================
+IF GVL_Buttons.ManualMode THEN
+    TelescopeDevice.EnableGenericDevice := TRUE;
+
+    IF GVL_Buttons.ManualTelescopeDown AND NOT GVL_Buttons.ManualTelescopeUp
+       AND NOT Emergency AND NOT GVL_Sensors.ExtenderSensor_Down THEN
+        IF NOT ManualTelescopeBrakeReleased THEN
+            GVL_Actuators.TelescopeBrake := TRUE;
+            BrakeReleaseTimer.PT         := BrakeReleaseTime;
+            BrakeReleaseTimer.IN         := TRUE;
+            IF BrakeReleaseTimer.Q THEN
+                ManualTelescopeBrakeReleased := TRUE;
+                BrakeReleaseTimer.IN         := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.TelescopeBrake     := TRUE;
+            GVL_Actuators.TelescopeFU_Enable := TRUE;
+            GVL_Actuators.TelescopeFU_Down   := TRUE;
+            GVL_Actuators.TelescopeFU_Up     := FALSE;
+            GVL_Actuators.TelescopeFU_Speed  := ManualSpeed;
+            TelescopeDevice.DeviceCmd        := TRUE;
+        END_IF
+
+    ELSIF GVL_Buttons.ManualTelescopeUp AND NOT GVL_Buttons.ManualTelescopeDown
+          AND NOT Emergency AND NOT GVL_Sensors.ExtenderSensor_Up THEN
+        IF NOT ManualTelescopeBrakeReleased THEN
+            GVL_Actuators.TelescopeBrake := TRUE;
+            BrakeReleaseTimer.PT         := BrakeReleaseTime;
+            BrakeReleaseTimer.IN         := TRUE;
+            IF BrakeReleaseTimer.Q THEN
+                ManualTelescopeBrakeReleased := TRUE;
+                BrakeReleaseTimer.IN         := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.TelescopeBrake     := TRUE;
+            GVL_Actuators.TelescopeFU_Enable := TRUE;
+            GVL_Actuators.TelescopeFU_Down   := FALSE;
+            GVL_Actuators.TelescopeFU_Up     := TRUE;
+            GVL_Actuators.TelescopeFU_Speed  := ManualSpeed;
+            TelescopeDevice.DeviceCmd        := FALSE;
+        END_IF
+
+    ELSE
+        IF ManualTelescopeBrakeReleased THEN
+            GVL_Actuators.TelescopeFU_Enable := FALSE;
+            GVL_Actuators.TelescopeFU_Down   := FALSE;
+            GVL_Actuators.TelescopeFU_Up     := FALSE;
+            GVL_Actuators.TelescopeFU_Speed  := 0.0;
+            BrakeApplyTimer.PT               := BrakeApplyTime;
+            BrakeApplyTimer.IN               := TRUE;
+            IF BrakeApplyTimer.Q THEN
+                GVL_Actuators.TelescopeBrake        := FALSE;
+                ManualTelescopeBrakeReleased        := FALSE;
+                BrakeApplyTimer.IN                  := FALSE;
+            END_IF
+        ELSE
+            GVL_Actuators.TelescopeFU_Enable := FALSE;
+            GVL_Actuators.TelescopeFU_Down   := FALSE;
+            GVL_Actuators.TelescopeFU_Up     := FALSE;
+            GVL_Actuators.TelescopeFU_Speed  := 0.0;
+            GVL_Actuators.TelescopeBrake     := FALSE;
+        END_IF
+    END_IF
+
+    IF Emergency THEN
+        GVL_Actuators.TelescopeFU_Enable    := FALSE;
+        GVL_Actuators.TelescopeFU_Down      := FALSE;
+        GVL_Actuators.TelescopeFU_Up        := FALSE;
+        GVL_Actuators.TelescopeFU_Speed     := 0.0;
+        GVL_Actuators.TelescopeBrake        := FALSE;
+        TelescopeDevice.DeviceCmd           := FALSE;
+        ManualTelescopeBrakeReleased        := FALSE;
+        TelescopeDevice.EnableGenericDevice := FALSE;
+    END_IF
+END_IF
+
+IF GVL_Buttons.ManualMode THEN
+    StationState := EnumStationState.Manual;
+ELSIF StationStep = 0    THEN StationState := EnumStationState.NotRunning;
+ELSIF StationStep = 500  THEN StationState := EnumStationState.Holding;
+ELSIF StationStep = 1000 THEN StationState := EnumStationState.Stopping;
+ELSE                          StationState := EnumStationState.Running;
+END_IF
+
+IF ResetError THEN TimeoutError := FALSE; END_IF
+
+BrakeReleaseTimer(IN:= BrakeReleaseTimer.IN, PT:= BrakeReleaseTimer.PT);
+BrakeApplyTimer  (IN:= BrakeApplyTimer.IN,   PT:= BrakeApplyTimer.PT);
+TimeoutTimer     (IN:= TimeoutTimer.IN,       PT:= TimeoutTimer.PT);
+TransitionTimer  (IN:= TransitionTimer.IN,    PT:= TransitionTimer.PT);
+
+TelescopeDevice(
+    EnableGenericDevice    := TelescopeDevice.EnableGenericDevice,
+    DeviceCmd              := TelescopeDevice.DeviceCmd,
+    FeedbackType           := EnumFeedbackType.NoFeedback,
+    ActuationType          := EnumActuationType.SingleActuation,
+    DeviceActivationTime   := T#3S,
+    DeviceDeactivationTime := T#3S
+);

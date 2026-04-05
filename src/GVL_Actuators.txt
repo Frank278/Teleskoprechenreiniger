@@ -1,0 +1,35 @@
+// =============================================================================
+// GVL_Actuators
+// PIXtend V2-L Pro I/O Mapping:
+//   DO0  = RakeFU_Enable
+//   DO1  = RakeFU_Away
+//   DO2  = RakeFU_Home
+//   DO3  = RakeBrake
+//   DO4  = TelescopeFU_Enable
+//   DO5  = TelescopeFU_Down
+//   DO6  = TelescopeFU_Up
+//   DO7  = TelescopeBrake
+//   DO8  = FlumeMotor_On
+//   DO9  = FlumeMotor_Close
+//   DO10–DO11 = Reserve
+//
+//   AO0  = RakeFU_Speed      (0–10V direkt an SEW FA57, kein Tiefpass nötig)
+//   AO1  = TelescopeFU_Speed (0–10V direkt an SEW FA67, kein Tiefpass nötig)
+//
+//   Relais R0–R3 = Reserve (z.B. Signallampen 230V)
+// =============================================================================
+
+VAR_GLOBAL
+    RakeFU_Enable       : BOOL;   // DO0
+    RakeFU_Away         : BOOL;   // DO1
+    RakeFU_Home         : BOOL;   // DO2
+    RakeFU_Speed        : REAL;   // AO0 (0.0–10.0 Volt → 0–100% Drehzahl SEW FA57)
+    RakeBrake           : BOOL;   // DO3
+    TelescopeFU_Enable  : BOOL;   // DO4
+    TelescopeFU_Down    : BOOL;   // DO5
+    TelescopeFU_Up      : BOOL;   // DO6
+    TelescopeFU_Speed   : REAL;   // AO1 (0.0–10.0 Volt → 0–100% Drehzahl SEW FA67)
+    TelescopeBrake      : BOOL;   // DO7
+    FlumeMotor_On       : BOOL;   // DO8
+    FlumeMotor_Close    : BOOL;   // DO9
+END_VAR

@@ -1,0 +1,20 @@
+// =============================================================================
+// GVL_Sensors
+// PIXtend V2-L Pro I/O Mapping:
+//   DI0 = RakeFCN_Away
+//   DI1 = RakeFCN_Home
+//   DI2 = ExtenderSensor_Down
+//   DI3 = ExtenderSensor_Up
+//   DI4 = FlumeSensor_Open
+//   DI5 = FlumeSensor_Closed
+// =============================================================================
+
+VAR_GLOBAL
+    RakeFCN_Away        : BOOL;   // DI0 — B-COMMAND FCN: Rechen in Away-Position
+    RakeFCN_Home        : BOOL;   // DI1 — B-COMMAND FCN: Rechen in Home-Position
+    ExtenderSensor_Down : BOOL;   // DI2 — autosen induktiv: Teleskop ausgefahren
+    ExtenderSensor_Up   : BOOL;   // DI3 — autosen induktiv: Teleskop eingefahren
+    FlumeSensor_Open    : BOOL;   // DI4 — Endschalter: Spülschieber offen
+    FlumeSensor_Closed  : BOOL;   // DI5 — Endschalter: Spülschieber geschlossen
+    FlumeAvailable      : BOOL := TRUE;
+END_VAR

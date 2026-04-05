@@ -1,0 +1,36 @@
+// =============================================================================
+// GVL_Buttons
+// PIXtend V2-L Pro I/O Mapping:
+//   DI8  = StartButton
+//   DI9  = StopButton
+//   DI6  = EmergencyButton  (NC-Kontakt! → im I/O-Mapping invertieren)
+//   DI7  = ResetButton
+//   DI10 = AutoMode         (Umschalter: 1=Auto, 0=Manual)
+//   DI11 = ManualRakeAway
+//   DI12 = ManualRakeHome
+//   DI13 = ManualTelescopeDown
+//   DI14 = ManualTelescopeUp
+//   DI15 = ManualFlume
+//
+//   HoldButton → kein DI! Nur über VISU setzen.
+//   ManualMode → kein DI! Wird im MainProgram abgeleitet: ManualMode := NOT AutoMode
+// =============================================================================
+
+{attribute 'qualified_only'}
+VAR_GLOBAL
+    // Automatik
+    StartButton         : BOOL;   // DI8
+    StopButton          : BOOL;   // DI9
+    HoldButton          : BOOL;   // VISU only — kein DI-Mapping!
+    EmergencyButton     : BOOL;   // DI6 (NC → im I/O-Mapping invertieren)
+    ResetButton         : BOOL;   // DI7
+    AutoMode            : BOOL;   // DI10 (Umschalter: 1=Auto, 0=Manual)
+    ManualMode          : BOOL;   // kein DI — gesetzt via: NOT AutoMode im MainProgram
+
+    // Handbetrieb
+    ManualRakeAway      : BOOL;   // DI11 — Hand: Arm wegschwenken
+    ManualRakeHome      : BOOL;   // DI12 — Hand: Arm zurückschwenken
+    ManualTelescopeDown : BOOL;   // DI13 — Hand: Arm runterfahren
+    ManualTelescopeUp   : BOOL;   // DI14 — Hand: Arm hochfahren
+    ManualFlume         : BOOL;   // DI15 — Hand: Spülrinne
+END_VAR

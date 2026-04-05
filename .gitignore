@@ -1,0 +1,26 @@
+# CODESYS generierte Dateien
+*.compiled-library
+*.library
+*.bak
+*.bak2
+*.bak3
+*.lock
+*.log
+
+# CODESYS Projektordner (Laufzeit)
+.codesys/
+__MACOSX/
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Raspberry Pi / PIXtend
+*.pyc
+__pycache__/
+
+# Temporäre Dateien
+*.tmp
+*.temp
+~$*
