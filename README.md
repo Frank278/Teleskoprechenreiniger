@@ -14,7 +14,7 @@ Automatisierungsprojekt für einen Teleskoprechenreiniger auf Basis eines Raspbe
 | SPS | PIXtend V2-L Pro | auf Raspberry Pi |
 | Motor Heben/Senken | SEW FA57/G | 0.55kW, Bremse BE1 |
 | Motor Teleskop | SEW FA67/G | 0.25kW, Bremse BE05 |
-| Motor Spülschieber | Onnen Krieger | 0.25kW, ohne FU/Bremse |
+| Motor Spülschieber | SEW FA67/G | 0.25kW, ohne FU/Bremse |
 | Endschalter Rechen | B-COMMAND FCN | RakeFCN_Away / RakeFCN_Home |
 | Endschalter Teleskop | autosen induktiv | ExtenderSensor_Down / Up |
 
