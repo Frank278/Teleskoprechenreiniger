@@ -1,0 +1,206 @@
+// =============================================================================
+// PROGRAM FlumeStation
+// Absperrschieber Spülrinne — Onnen Krieger G43A, Wendeschütz K4/K5, kein FU
+//
+// ÄNDERUNG 25.07.2026: Schließpfade hinter GVL_Sensors.FlumeAvailable gelegt.
+//   Ohne montierten Schieber liest DI5 dauerhaft FALSE, dadurch war
+//   FlumeMotor_Close (DO9) in Step 0 und im Handbetrieb permanent TRUE.
+// =============================================================================
+
+VAR_INPUT
+    Start           : BOOL;
+    Stop            : BOOL;
+    Hold            : BOOL;
+    Emergency       : BOOL;
+    ResetError      : BOOL;
+END_VAR
+VAR_OUTPUT
+    StationState    : EnumStationState;
+    StationStep     : UINT;
+    TimeoutError    : BOOL;
+END_VAR
+VAR
+    HoldState       : UINT;
+    HoldRequest     : BOOL;
+    FlumeDevice     : FB_GenericDevice;
+    TimeoutTimer    : TON;
+    PauseTimer      : TON;
+    FlumeTimeout    : TIME := T#30S;
+END_VAR
+
+// =============================================================================
+// AUTOMATIK
+// =============================================================================
+IF NOT GVL_Buttons.ManualMode THEN
+CASE StationStep OF
+
+    0:
+        TimeoutTimer.IN                 := FALSE;
+        PauseTimer.IN                   := FALSE;
+        GVL_Actuators.FlumeMotor_On     := FALSE;
+        FlumeDevice.DeviceCmd           := FALSE;
+        FlumeDevice.EnableGenericDevice := FALSE;
+        // Sicherheit: Schieber zurück nach links falls nicht in Grundstellung
+        // FlumeAvailable-Abfrage zwingend: ohne montierten Schieber liest DI5
+        // dauerhaft FALSE → FlumeMotor_Close wäre sonst permanent TRUE.
+        IF GVL_Sensors.FlumeAvailable AND NOT GVL_Sensors.FlumeSensor_Closed THEN
+            GVL_Actuators.FlumeMotor_Close := TRUE;
+        ELSE
+            GVL_Actuators.FlumeMotor_Close := FALSE;
+        END_IF
+        IF Start THEN
+            IF GVL_Sensors.FlumeAvailable THEN
+                FlumeDevice.EnableGenericDevice := TRUE;
+                StationStep := 10;
+            END_IF
+        END_IF
+
+    // Schieber fährt RECHTS bis Spül Rechts
+    10:
+        GVL_Actuators.FlumeMotor_On    := TRUE;
+        GVL_Actuators.FlumeMotor_Close := FALSE;
+        FlumeDevice.DeviceCmd          := TRUE;
+        TimeoutTimer.PT                := FlumeTimeout;
+        TimeoutTimer.IN                := TRUE;
+        IF GVL_Sensors.FlumeSensor_Open THEN
+            GVL_Actuators.FlumeMotor_On := FALSE;
+            TimeoutTimer.IN             := FALSE;
+            StationStep := 20;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Schieber fährt LINKS bis Spül Links
+    20:
+        GVL_Actuators.FlumeMotor_On    := FALSE;
+        GVL_Actuators.FlumeMotor_Close := TRUE;
+        FlumeDevice.DeviceCmd          := FALSE;
+        TimeoutTimer.PT                := FlumeTimeout;
+        TimeoutTimer.IN                := TRUE;
+        IF GVL_Sensors.FlumeSensor_Closed THEN
+            GVL_Actuators.FlumeMotor_Close := FALSE;
+            TimeoutTimer.IN                := FALSE;
+            StationStep := 25;
+        ELSIF TimeoutTimer.Q THEN
+            TimeoutTimer.IN := FALSE;
+            TimeoutError    := TRUE;
+            StationStep     := 1000;
+        END_IF
+
+    // Pause 3 Sekunden bei Spül Links
+    25:
+        PauseTimer.PT := T#3S;
+        PauseTimer.IN := TRUE;
+        IF PauseTimer.Q THEN
+            PauseTimer.IN := FALSE;
+            StationStep   := 30;
+        END_IF
+
+    // Fertig → zurück zu 0
+    30:
+        GVL_Actuators.FlumeMotor_On     := FALSE;
+        GVL_Actuators.FlumeMotor_Close  := FALSE;
+        FlumeDevice.DeviceCmd           := FALSE;
+        FlumeDevice.EnableGenericDevice := FALSE;
+        StationStep := 0;
+
+    500:
+        IF NOT Hold THEN
+            StationStep := HoldState;
+            HoldState   := 0;
+        END_IF
+
+    1000:
+        GVL_Actuators.FlumeMotor_On     := FALSE;
+        GVL_Actuators.FlumeMotor_Close  := FALSE;
+        FlumeDevice.DeviceCmd           := FALSE;
+        FlumeDevice.EnableGenericDevice := FALSE;
+        StationStep := 0;
+
+END_CASE
+
+IF StationStep <> 0 AND Emergency THEN
+    GVL_Actuators.FlumeMotor_On     := FALSE;
+    GVL_Actuators.FlumeMotor_Close  := FALSE;
+    FlumeDevice.DeviceCmd           := FALSE;
+    FlumeDevice.EnableGenericDevice := FALSE;
+    StationStep := 0;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 1000 AND Stop THEN
+    StationStep := 1000;
+END_IF
+
+IF StationStep <> 0 AND StationStep <> 500 AND StationStep <> 1000 AND Hold THEN
+    HoldRequest := TRUE;
+END_IF
+
+IF StationStep <> 500 AND
+   StationStep <> 10  AND
+   StationStep <> 20  AND
+   HoldRequest THEN
+    HoldRequest := FALSE;
+    HoldState   := StationStep;
+    StationStep := 500;
+END_IF
+
+END_IF
+
+// =============================================================================
+// MANUELL
+// =============================================================================
+IF GVL_Buttons.ManualMode THEN
+    FlumeDevice.EnableGenericDevice := TRUE;
+
+    IF GVL_Buttons.ManualFlume AND NOT Emergency
+       AND GVL_Sensors.FlumeAvailable
+       AND NOT GVL_Sensors.FlumeSensor_Open THEN
+        GVL_Actuators.FlumeMotor_On    := TRUE;
+        GVL_Actuators.FlumeMotor_Close := FALSE;
+        FlumeDevice.DeviceCmd          := TRUE;
+    ELSIF NOT GVL_Buttons.ManualFlume AND NOT Emergency
+          AND GVL_Sensors.FlumeAvailable
+          AND NOT GVL_Sensors.FlumeSensor_Closed THEN
+        GVL_Actuators.FlumeMotor_On    := FALSE;
+        GVL_Actuators.FlumeMotor_Close := TRUE;
+        FlumeDevice.DeviceCmd          := FALSE;
+    ELSE
+        GVL_Actuators.FlumeMotor_On    := FALSE;
+        GVL_Actuators.FlumeMotor_Close := FALSE;
+        FlumeDevice.DeviceCmd          := FALSE;
+    END_IF
+
+    IF Emergency THEN
+        GVL_Actuators.FlumeMotor_On     := FALSE;
+        GVL_Actuators.FlumeMotor_Close  := FALSE;
+        FlumeDevice.DeviceCmd           := FALSE;
+        FlumeDevice.EnableGenericDevice := FALSE;
+    END_IF
+END_IF
+
+// =============================================================================
+// STATIONSTATE
+// =============================================================================
+IF GVL_Buttons.ManualMode THEN
+    StationState := EnumStationState.Manual;
+ELSIF StationStep = 0    THEN StationState := EnumStationState.NotRunning;
+ELSIF StationStep = 500  THEN StationState := EnumStationState.Holding;
+ELSIF StationStep = 1000 THEN StationState := EnumStationState.Stopping;
+ELSE                          StationState := EnumStationState.Running;
+END_IF
+
+IF ResetError THEN TimeoutError := FALSE; END_IF
+
+TimeoutTimer(IN:= TimeoutTimer.IN, PT:= TimeoutTimer.PT);
+PauseTimer  (IN:= PauseTimer.IN,   PT:= PauseTimer.PT);
+
+FlumeDevice(
+    EnableGenericDevice    := FlumeDevice.EnableGenericDevice,
+    DeviceCmd              := FlumeDevice.DeviceCmd,
+    FeedbackType           := EnumFeedbackType.NoFeedback,
+    ActuationType          := EnumActuationType.SingleActuation,
+    DeviceActivationTime   := T#500MS,
+    DeviceDeactivationTime := T#500MS
+);

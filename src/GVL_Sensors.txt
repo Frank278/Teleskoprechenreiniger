@@ -16,5 +16,8 @@ VAR_GLOBAL
     ExtenderSensor_Up   : BOOL;   // DI3 — autosen induktiv: Teleskop eingefahren
     FlumeSensor_Open    : BOOL;   // DI4 — Endschalter: Spülschieber offen
     FlumeSensor_Closed  : BOOL;   // DI5 — Endschalter: Spülschieber geschlossen
-    FlumeAvailable      : BOOL := TRUE;
+    // Spülschieber mechanisch noch nicht montiert (Betonarbeiten laufen).
+    // Erst auf TRUE setzen wenn: Schieber montiert UND verdrahtet UND
+    // Motorschutzschalter eingeschaltet UND Sensoren DI4/DI5 geprüft.
+    FlumeAvailable      : BOOL := FALSE;
 END_VAR

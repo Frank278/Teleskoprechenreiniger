@@ -98,8 +98,10 @@ RakeActive      := RakeStation.StationState      = EnumStationState.Running;
 TelescopeActive := TelescopeStation.StationState = EnumStationState.Running;
 FlumeActive     := FlumeStation.StationState     = EnumStationState.Running;
 
+// Hinweis: im Handbetrieb melden ALLE Stationen StationState = Manual,
+// niemals NotRunning. Die frühere Abfrage auf NotRunning war deshalb
+// konstant FALSE und hat die Handtasten in der VISU dauerhaft gesperrt.
 ManualButtonsEnable :=
-    GVL_Buttons.ManualMode AND
-    RakeStation.StationState      = EnumStationState.NotRunning AND
-    TelescopeStation.StationState = EnumStationState.NotRunning AND
-    FlumeStation.StationState     = EnumStationState.NotRunning;
+    GVL_Buttons.ManualMode
+    AND NOT GVL_Buttons.EmergencyButton
+    AND NOT EmergencyLatched;
